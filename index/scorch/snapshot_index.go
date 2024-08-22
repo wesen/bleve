@@ -48,6 +48,8 @@ type asynchSegmentResult struct {
 	postings segment.PostingsList
 
 	err error
+
+	bytesRead uint64
 }
 
 var reflectStaticSizeIndexSnapshot int
@@ -145,26 +147,27 @@ func (is *IndexSnapshot) newIndexSnapshotFieldDict(field string,
 	randomLookup bool) (*IndexSnapshotFieldDict, error) {
 
 	results := make(chan *asynchSegmentResult)
-	var totalBytesRead uint64
 	for _, s := range is.segment {
 		go func(s *SegmentSnapshot) {
 			dict, err := s.segment.Dictionary(field)
 			if err != nil {
 				results <- &asynchSegmentResult{err: err}
 			} else {
+				var bytesRead uint64
 				if dictStats, ok := dict.(segment.DiskStatsReporter); ok {
-					atomic.AddUint64(&totalBytesRead, dictStats.BytesRead())
+					bytesRead = dictStats.BytesRead()
 				}
 				if randomLookup {
-					results <- &asynchSegmentResult{dict: dict}
+					results <- &asynchSegmentResult{dict: dict, bytesRead: bytesRead}
 				} else {
-					results <- &asynchSegmentResult{dictItr: makeItr(dict)}
+					results <- &asynchSegmentResult{dictItr: makeItr(dict), bytesRead: bytesRead}
 				}
 			}
 		}(s)
 	}
 
 	var err error
+	var totalBytesRead uint64
 	rv := &IndexSnapshotFieldDict{
 		snapshot: is,
 		cursors:  make([]*segmentDictCursor, 0, len(is.segment)),
@@ -190,6 +193,7 @@ func (is *IndexSnapshot) newIndexSnapshotFieldDict(field string,
 					dict: asr.dict,
 				})
 			}
+			totalBytesRead += asr.bytesRead
 		}
 	}
 	rv.bytesRead = totalBytesRead
