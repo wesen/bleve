@@ -441,7 +441,7 @@ func (s *Scorch) Batch(batch *index.Batch) (err error) {
 	stats := newFieldStats()
 
 	if len(analysisResults) > 0 {
-		newSegment, bufBytes, err = s.segPlugin.New(analysisResults)
+		newSegment, bufBytes, err = s.segPlugin.NewEx(analysisResults, s.config)
 		if err != nil {
 			return err
 		}

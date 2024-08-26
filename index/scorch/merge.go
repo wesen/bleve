@@ -358,7 +358,7 @@ func (s *Scorch) planMergeAtSnapshot(ctx context.Context,
 				return fmt.Errorf("merging failed: %v", err)
 			}
 
-			seg, err = s.segPlugin.Open(path)
+			seg, err = s.segPlugin.OpenEx(path, s.config)
 			if err != nil {
 				s.unmarkIneligibleForRemoval(filename)
 				atomic.AddUint64(&s.stats.TotFileMergePlanTasksErr, 1)
@@ -484,7 +484,7 @@ func (s *Scorch) mergeSegmentBases(snapshot *IndexSnapshot,
 		return nil, 0, err
 	}
 
-	seg, err := s.segPlugin.Open(path)
+	seg, err := s.segPlugin.OpenEx(path, s.config)
 	if err != nil {
 		atomic.AddUint64(&s.stats.TotMemMergeErr, 1)
 		return nil, 0, err
