@@ -44,6 +44,7 @@ type Scorch struct {
 	readOnly      bool
 	version       uint8
 	config        map[string]interface{}
+	segmentConfig map[string]interface{}
 	analysisQueue *index.AnalysisQueue
 	path          string
 
@@ -323,6 +324,14 @@ func (s *Scorch) openBolt() error {
 		s.rollbackRetentionFactor = r
 	}
 
+	if v, ok := s.config["cacheExpiryTime"]; ok {
+		// validate right at the beginning
+		if _, err = parseToTimeDuration(v); err != nil {
+			return fmt.Errorf("cacheExpiryTime parse err: %v", err)
+		}
+		s.segmentConfig["cacheExpiryTime"] = v
+	}
+
 	typ, ok := s.config["spatialPlugin"].(string)
 	if ok {
 		s.loadSpatialAnalyzerPlugin(typ)
@@ -441,7 +450,7 @@ func (s *Scorch) Batch(batch *index.Batch) (err error) {
 	stats := newFieldStats()
 
 	if len(analysisResults) > 0 {
-		newSegment, bufBytes, err = s.segPlugin.NewEx(analysisResults, s.config)
+		newSegment, bufBytes, err = s.segPlugin.NewEx(analysisResults, s.segmentConfig)
 		if err != nil {
 			return err
 		}
