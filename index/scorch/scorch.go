@@ -122,6 +122,7 @@ func NewScorch(storeName string,
 		forceMergeRequestCh:  make(chan *mergerCtrl, 1),
 		segPlugin:            defaultSegmentPlugin,
 		copyScheduled:        map[string]int{},
+		segmentConfig:        make(map[string]interface{}),
 	}
 
 	forcedSegmentType, forcedSegmentVersion, err := configForceSegmentTypeVersion(config)
@@ -322,14 +323,6 @@ func (s *Scorch) openBolt() error {
 			return fmt.Errorf("rollbackRetentionFactor parse err: %v", err)
 		}
 		s.rollbackRetentionFactor = r
-	}
-
-	if v, ok := s.config["cacheExpiryTime"]; ok {
-		// validate right at the beginning
-		if _, err = parseToTimeDuration(v); err != nil {
-			return fmt.Errorf("cacheExpiryTime parse err: %v", err)
-		}
-		s.segmentConfig["cacheExpiryTime"] = v
 	}
 
 	typ, ok := s.config["spatialPlugin"].(string)
