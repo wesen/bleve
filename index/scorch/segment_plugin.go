@@ -71,6 +71,10 @@ type SegmentPlugin interface {
 	Merge(segments []segment.Segment, drops []*roaring.Bitmap, path string,
 		closeCh chan struct{}, s segment.StatsReporter) (
 		[][]uint64, uint64, error)
+
+	MergeEx(segments []segment.Segment, drops []*roaring.Bitmap, path string,
+		closeCh chan struct{}, s segment.StatsReporter, config map[string]interface{}) (
+		[][]uint64, uint64, error)
 }
 
 var supportedSegmentPlugins map[string]map[uint32]SegmentPlugin
