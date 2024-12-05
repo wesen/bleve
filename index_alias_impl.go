@@ -30,7 +30,6 @@ type indexAliasImpl struct {
 	name    string
 	indexes []Index
 	mutex   sync.RWMutex
-	mapping mapping.IndexMapping
 	open    bool
 	// if all the indexes in tha alias have the same mapping
 	// then the user can set the mapping here to avoid
@@ -174,7 +173,8 @@ func (i *indexAliasImpl) SearchInContext(ctx context.Context, req *SearchRequest
 		// in another alias, so we need to do a preSearch search
 		// and NOT a real search
 		flags := &preSearchFlags{
-			knn: requestHasKNN(req), // set knn flag if the request has KNN
+			knn:  requestHasKNN(req), // set knn flag if the request has KNN
+			bm25: true,               // TODO Just force setting it to true to test
 		}
 		return preSearchDataSearch(ctx, req, flags, i.indexes...)
 	}
@@ -528,13 +528,6 @@ func (i *indexAliasImpl) Swap(in, out []Index) {
 	}
 }
 
-func (i *indexAliasImpl) SetIndexMapping(m mapping.IndexMapping) {
-	i.mutex.Lock()
-	defer i.mutex.Unlock()
-
-	i.mapping = m
-}
-
 // createChildSearchRequest creates a separate
 // request from the original
 // For now, avoid data race on req structure.
@@ -555,7 +548,8 @@ type asyncSearchResult struct {
 
 // preSearchFlags is a struct to hold flags indicating why preSearch is required
 type preSearchFlags struct {
-	knn bool
+	knn  bool
+	bm25 bool // needs presearch for this too
 }
 
 // preSearchRequired checks if preSearch is required and returns the presearch flags struct
@@ -563,9 +557,18 @@ type preSearchFlags struct {
 func preSearchRequired(req *SearchRequest, m mapping.IndexMapping) *preSearchFlags {
 	// Check for KNN query
 	knn := requestHasKNN(req)
-	if knn {
+	var bm25 bool
+	if !isMatchNoneQuery(req.Query) {
+		// todo fix this cuRRENTLY ALL INDEX mappings are BM25 mappings, need to fix
+		// this is just a placeholder.
+		if _, ok := m.(mapping.BM25Mapping); ok {
+			bm25 = true
+		}
+	}
+	if knn || bm25 {
 		return &preSearchFlags{
-			knn: knn,
+			knn:  knn,
+			bm25: bm25,
 		}
 	}
 	return nil
@@ -574,8 +577,14 @@ func preSearchRequired(req *SearchRequest, m mapping.IndexMapping) *preSearchFla
 func preSearch(ctx context.Context, req *SearchRequest, flags *preSearchFlags, indexes ...Index) (*SearchResult, error) {
 	// create a dummy request with a match none query
 	// since we only care about the preSearchData in PreSearch
+	var dummyQuery = req.Query
+	if !flags.bm25 {
+		// create a dummy request with a match none query
+		// since we only care about the preSearchData in PreSearch
+		dummyQuery = query.NewMatchNoneQuery()
+	}
 	dummyRequest := &SearchRequest{
-		Query: query.NewMatchNoneQuery(),
+		Query: dummyQuery,
 	}
 	newCtx := context.WithValue(ctx, search.PreSearchKey, true)
 	if flags.knn {
@@ -639,6 +648,13 @@ func requestSatisfiedByPreSearch(req *SearchRequest, flags *preSearchFlags) bool
 	return false
 }
 
+func constructBM25PreSearchData(rv map[string]map[string]interface{}, sr *SearchResult, indexes []Index) map[string]map[string]interface{} {
+	for _, index := range indexes {
+		rv[index.Name()][search.BM25PreSearchDataKey] = sr.totalDocCount
+	}
+	return rv
+}
+
 func constructPreSearchData(req *SearchRequest, flags *preSearchFlags,
 	preSearchResult *SearchResult, indexes []Index) (map[string]map[string]interface{}, error) {
 	mergedOut := make(map[string]map[string]interface{}, len(indexes))
@@ -652,31 +668,10 @@ func constructPreSearchData(req *SearchRequest, flags *preSearchFlags,
 			return nil, err
 		}
 	}
+	if flags.bm25 {
+		mergedOut = constructBM25PreSearchData(mergedOut, preSearchResult, indexes)
+	}
 	return mergedOut, nil
-}
-
-func redistributePreSearchData(req *SearchRequest, indexes []Index) (map[string]map[string]interface{}, error) {
-	rv := make(map[string]map[string]interface{})
-	for _, index := range indexes {
-		rv[index.Name()] = make(map[string]interface{})
-	}
-	if knnHits, ok := req.PreSearchData[search.KnnPreSearchDataKey].([]*search.DocumentMatch); ok {
-		// the preSearchData for KNN is a list of DocumentMatch objects
-		// that need to be redistributed to the right index.
-		// This is used only in the case of an alias tree, where the indexes
-		// are at the leaves of the tree, and the master alias is at the root.
-		// At each level of the tree, the preSearchData needs to be redistributed
-		// to the indexes/aliases at that level. Because the preSearchData is
-		// specific to each final index at the leaf.
-		segregatedKnnHits, err := validateAndDistributeKNNHits(knnHits, indexes)
-		if err != nil {
-			return nil, err
-		}
-		for _, index := range indexes {
-			rv[index.Name()][search.KnnPreSearchDataKey] = segregatedKnnHits[index.Name()]
-		}
-	}
-	return rv, nil
 }
 
 func preSearchDataSearch(ctx context.Context, req *SearchRequest, flags *preSearchFlags, indexes ...Index) (*SearchResult, error) {
@@ -778,6 +773,13 @@ func redistributePreSearchData(req *SearchRequest, indexes []Index) (map[string]
 		}
 		for _, index := range indexes {
 			rv[index.Name()][search.KnnPreSearchDataKey] = segregatedKnnHits[index.Name()]
+		}
+	}
+
+	// TODO Extend to more stats
+	if totalDocCount, ok := req.PreSearchData[search.BM25PreSearchDataKey].(uint64); ok {
+		for _, index := range indexes {
+			rv[index.Name()][search.BM25PreSearchDataKey] = totalDocCount
 		}
 	}
 	return rv, nil

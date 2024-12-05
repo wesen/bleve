@@ -46,6 +46,24 @@ func (k *knnPreSearchResultProcessor) finalize(sr *SearchResult) {
 }
 
 // -----------------------------------------------------------------------------
+type bm25PreSearchResultProcessor struct {
+	docCount uint64 // bm25 specific stats
+}
+
+func newBM25PreSearchResultProcessor() *bm25PreSearchResultProcessor {
+	return &bm25PreSearchResultProcessor{}
+}
+
+// TODO How will this work for queries other than term queries?
+func (b *bm25PreSearchResultProcessor) add(sr *SearchResult, indexName string) {
+	b.docCount += (sr.totalDocCount)
+}
+
+func (b *bm25PreSearchResultProcessor) finalize(sr *SearchResult) {
+
+}
+
+// -----------------------------------------------------------------------------
 // Master struct that can hold any number of presearch result processors
 type compositePreSearchResultProcessor struct {
 	presearchResultProcessors []preSearchResultProcessor
@@ -75,6 +93,11 @@ func createPreSearchResultProcessor(req *SearchRequest, flags *preSearchFlags) p
 			processors = append(processors, knnProcessor)
 		}
 	}
+	if flags.bm25 {
+		if bm25Processtor := newBM25PreSearchResultProcessor(); bm25Processtor != nil {
+			processors = append(processors, bm25Processtor)
+		}
+	}
 	// Return based on the number of processors, optimizing for the common case of 1 processor
 	// If there are no processors, return nil
 	switch len(processors) {
@@ -86,12 +109,5 @@ func createPreSearchResultProcessor(req *SearchRequest, flags *preSearchFlags) p
 		return &compositePreSearchResultProcessor{
 			presearchResultProcessors: processors,
 		}
-	}
-}
-
-// -----------------------------------------------------------------------------
-func finalizePreSearchResult(req *SearchRequest, flags *preSearchFlags, preSearchResult *SearchResult) {
-	if flags.knn {
-		preSearchResult.Hits = finalizeKNNResults(req, preSearchResult.Hits)
 	}
 }
