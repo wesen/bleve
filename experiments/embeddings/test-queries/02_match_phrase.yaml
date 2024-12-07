@@ -1,0 +1,10 @@
+query:
+  match_phrase:
+    field: content
+    value: "quick brown fox"
+    slop: 0
+    boost: 1.0
+options:
+  size: 10
+  highlight:
+    fields: [content] 

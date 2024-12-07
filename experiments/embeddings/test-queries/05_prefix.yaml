@@ -1,0 +1,9 @@
+query:
+  prefix:
+    field: content
+    value: "quick"
+    boost: 1.0
+options:
+  size: 10
+  highlight:
+    fields: [content] 

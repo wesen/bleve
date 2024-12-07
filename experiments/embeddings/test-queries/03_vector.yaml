@@ -1,0 +1,10 @@
+query:
+  vector:
+    field: vector
+    text: "What is the meaning of existence?"
+    model: all-minilm
+    k: 10
+    boost: 1.0
+options:
+  size: 10
+  fields: [content, vector] 

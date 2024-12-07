@@ -273,14 +273,12 @@ Allows you to use Bleve's query string syntax, which is similar to the Lucene qu
 query:
   query_string:
     query: "title:golang AND (tags:programming OR tags:database) NOT status:draft"
-    default_field: content # Optional: The default field to search if no field is specified in the query string
     boost: 1.0
 ````
 
 **Fields:**
 
 *   **`query`:** (Required, string) The query string.
-*   **`default_field`:** (Optional, string) The default field to use when no field is explicitly specified in the query string.
 *   **`boost`:** (Optional, float) Boost factor.
 
 ### 3.12 Doc ID Query
