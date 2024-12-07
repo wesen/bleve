@@ -18,3 +18,5 @@ vendor/**
 *.test
 tags
 go.sum
+
+*.bleve

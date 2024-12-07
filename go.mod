@@ -30,6 +30,7 @@ require (
 	github.com/spf13/cobra v1.7.0
 	go.etcd.io/bbolt v1.3.7
 	golang.org/x/text v0.8.0
+	gopkg.in/yaml.v2 v2.2.1
 )
 
 require (
