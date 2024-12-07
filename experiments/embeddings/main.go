@@ -14,7 +14,7 @@ import (
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/mapping"
-	"github.com/blevesearch/bleve/v2/search"
+	"github.com/blevesearch/bleve/v2/search/query"
 )
 
 // Document represents the structure of our documents.
@@ -22,6 +22,114 @@ type Document struct {
 	ID      string    `json:"id"`
 	Content string    `json:"content"`
 	Vector  []float32 `json:"vector"`
+}
+
+// SearchRequest represents the structure of the query DSL
+type SearchRequest struct {
+	Query   QueryDSL         `yaml:"query"`
+	Options *SearchOptions   `yaml:"options,omitempty"`
+	Facets  map[string]Facet `yaml:"facets,omitempty"`
+}
+
+// QueryDSL represents different types of queries
+type QueryDSL struct {
+	Match       *MatchQuery       `yaml:"match,omitempty"`
+	MatchPhrase *MatchPhraseQuery `yaml:"match_phrase,omitempty"`
+	Vector      *VectorQuery      `yaml:"vector,omitempty"`
+	Bool        *BooleanQuery     `yaml:"bool,omitempty"`
+	Term        *TermQuery        `yaml:"term,omitempty"`
+	QueryString *QueryStringQuery `yaml:"query_string,omitempty"`
+}
+
+// MatchQuery represents a full-text search query
+type MatchQuery struct {
+	Field        string  `yaml:"field"`
+	Value        string  `yaml:"value"`
+	Boost        float64 `yaml:"boost,omitempty"`
+	Operator     string  `yaml:"operator,omitempty"`
+	Fuzziness    int     `yaml:"fuzziness,omitempty"`
+	PrefixLength int     `yaml:"prefix_length,omitempty"`
+	Analyzer     string  `yaml:"analyzer,omitempty"`
+}
+
+// MatchPhraseQuery represents a phrase search query
+type MatchPhraseQuery struct {
+	Field    string  `yaml:"field"`
+	Value    string  `yaml:"value"`
+	Boost    float64 `yaml:"boost,omitempty"`
+	Slop     int     `yaml:"slop,omitempty"`
+	Analyzer string  `yaml:"analyzer,omitempty"`
+}
+
+// VectorQuery represents a vector similarity search
+type VectorQuery struct {
+	Field  string    `yaml:"field"`
+	Text   string    `yaml:"text,omitempty"`
+	Vector []float32 `yaml:"vector,omitempty"`
+	Model  string    `yaml:"model"`
+	K      int       `yaml:"k"`
+	Boost  float64   `yaml:"boost,omitempty"`
+}
+
+// BooleanQuery represents a boolean combination of queries
+type BooleanQuery struct {
+	Must               []QueryDSL `yaml:"must,omitempty"`
+	Should             []QueryDSL `yaml:"should,omitempty"`
+	MustNot            []QueryDSL `yaml:"must_not,omitempty"`
+	MinimumShouldMatch int        `yaml:"minimum_should_match,omitempty"`
+	Boost              float64    `yaml:"boost,omitempty"`
+}
+
+// TermQuery represents an exact term search
+type TermQuery struct {
+	Field string  `yaml:"field"`
+	Value string  `yaml:"value"`
+	Boost float64 `yaml:"boost,omitempty"`
+}
+
+// QueryStringQuery represents a query string search
+type QueryStringQuery struct {
+	Query string  `yaml:"query"`
+	Boost float64 `yaml:"boost,omitempty"`
+}
+
+// SearchOptions represents search configuration options
+type SearchOptions struct {
+	Size      int          `yaml:"size,omitempty"`
+	From      int          `yaml:"from,omitempty"`
+	Explain   bool         `yaml:"explain,omitempty"`
+	Fields    []string     `yaml:"fields,omitempty"`
+	Sort      []SortOption `yaml:"sort,omitempty"`
+	Highlight *Highlight   `yaml:"highlight,omitempty"`
+}
+
+// SortOption represents a sort configuration
+type SortOption struct {
+	Field string `yaml:"field"`
+	Desc  bool   `yaml:"desc,omitempty"`
+}
+
+// Highlight represents highlighting configuration
+type Highlight struct {
+	Style  string   `yaml:"style,omitempty"`
+	Fields []string `yaml:"fields,omitempty"`
+}
+
+// Facet represents a facet configuration
+type Facet struct {
+	Type   string       `yaml:"type"`
+	Field  string       `yaml:"field"`
+	Size   int          `yaml:"size,omitempty"`
+	Ranges []FacetRange `yaml:"ranges,omitempty"`
+}
+
+// FacetRange represents a range for numeric or date facets
+type FacetRange struct {
+	Name  string      `yaml:"name"`
+	Min   interface{} `yaml:"min,omitempty"`
+	Max   interface{} `yaml:"max,omitempty"`
+	Start string      `yaml:"start,omitempty"`
+	End   string      `yaml:"end,omitempty"`
 }
 
 // generateEmbedding generates a vector embedding for the given text using the Ollama API.
@@ -121,38 +229,183 @@ func createIndex(indexPath string) (bleve.Index, error) {
 	return index, nil
 }
 
-// searchIndex performs a hybrid search on the Bleve index.
-func searchIndex(index bleve.Index, queryString string, k int) (*bleve.SearchResult, error) {
-	// Generate embedding for the query
-	queryVector, err := generateEmbedding(queryString)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
+// buildBleveQuery converts a QueryDSL to a bleve.Query
+func buildBleveQuery(q QueryDSL) (query.Query, error) {
+	if q.Match != nil {
+		query := bleve.NewMatchQuery(q.Match.Value)
+		query.SetField(q.Match.Field)
+		if q.Match.Boost != 0 {
+			query.SetBoost(q.Match.Boost)
+		}
+		return query, nil
 	}
 
-	// Create text query
-	textQuery := bleve.NewMatchQuery(queryString)
-	textQuery.SetField("content")
-
-	// Create search request with text query
-	searchRequest := bleve.NewSearchRequest(textQuery)
-	searchRequest.Size = k
-	searchRequest.Fields = []string{"id", "content"}
-	searchRequest.Highlight = bleve.NewHighlight()
-	searchRequest.Highlight.Fields = []string{"content"}
-
-	// Add vector search
-	searchRequest.AddKNN("vector", queryVector, int64(k), 1.0)
-
-	// Execute search
-	searchResult, err := index.Search(searchRequest)
-	if err != nil {
-		return nil, fmt.Errorf("search failed: %w", err)
+	if q.MatchPhrase != nil {
+		query := bleve.NewMatchPhraseQuery(q.MatchPhrase.Value)
+		query.SetField(q.MatchPhrase.Field)
+		if q.MatchPhrase.Boost != 0 {
+			query.SetBoost(q.MatchPhrase.Boost)
+		}
+		return query, nil
 	}
 
-	// Log the search result fields for debugging
-	log.Printf("Search result: %+v", searchResult)
+	if q.Vector != nil {
+		var queryVector []float32
+		var err error
 
-	return searchResult, nil
+		if q.Vector.Text != "" {
+			queryVector, err = generateEmbedding(q.Vector.Text)
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate vector embedding: %w", err)
+			}
+			log.Printf("Generated vector embedding: %v", queryVector)
+		} else if q.Vector.Vector != nil {
+			queryVector = q.Vector.Vector
+		} else {
+			return nil, fmt.Errorf("either text or vector must be provided for vector query")
+		}
+
+		searchRequest := bleve.NewSearchRequest(bleve.NewMatchNoneQuery())
+		searchRequest.Size = q.Vector.K
+		searchRequest.AddKNN(q.Vector.Field, queryVector, int64(q.Vector.K), q.Vector.Boost)
+		return searchRequest.Query, nil
+	}
+
+	if q.Bool != nil {
+		boolQuery := bleve.NewBooleanQuery()
+
+		for _, must := range q.Bool.Must {
+			q, err := buildBleveQuery(must)
+			if err != nil {
+				return nil, err
+			}
+			boolQuery.AddMust(q)
+		}
+
+		for _, should := range q.Bool.Should {
+			q, err := buildBleveQuery(should)
+			if err != nil {
+				return nil, err
+			}
+			boolQuery.AddShould(q)
+		}
+
+		for _, mustNot := range q.Bool.MustNot {
+			q, err := buildBleveQuery(mustNot)
+			if err != nil {
+				return nil, err
+			}
+			boolQuery.AddMustNot(q)
+		}
+
+		if q.Bool.MinimumShouldMatch > 0 {
+			boolQuery.SetMinShould(float64(q.Bool.MinimumShouldMatch))
+		}
+
+		if q.Bool.Boost != 0 {
+			boolQuery.SetBoost(q.Bool.Boost)
+		}
+
+		return boolQuery, nil
+	}
+
+	if q.Term != nil {
+		query := bleve.NewTermQuery(q.Term.Value)
+		query.SetField(q.Term.Field)
+		if q.Term.Boost != 0 {
+			query.SetBoost(q.Term.Boost)
+		}
+		return query, nil
+	}
+
+	if q.QueryString != nil {
+		q_ := bleve.NewQueryStringQuery(q.QueryString.Query)
+		if q.QueryString.Boost != 0 {
+			q_.SetBoost(q.QueryString.Boost)
+		}
+		return q_, nil
+	}
+
+	return nil, fmt.Errorf("no valid query type found")
+}
+
+// handleSearch processes search requests using the query DSL
+func handleSearch(index bleve.Index) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Read the request body
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+
+		// Parse the YAML request
+		var searchReq SearchRequest
+		if err := yaml.Unmarshal(body, &searchReq); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to parse YAML: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Build the Bleve query
+		bleveQuery, err := buildBleveQuery(searchReq.Query)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to build query: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Create search request
+		searchRequest := bleve.NewSearchRequest(bleveQuery)
+
+		// Apply options if provided
+		if searchReq.Options != nil {
+			if searchReq.Options.Size > 0 {
+				searchRequest.Size = searchReq.Options.Size
+			}
+			if searchReq.Options.From > 0 {
+				searchRequest.From = searchReq.Options.From
+			}
+			if len(searchReq.Options.Fields) > 0 {
+				searchRequest.Fields = searchReq.Options.Fields
+			}
+			if searchReq.Options.Explain {
+				searchRequest.Explain = true
+			}
+			if searchReq.Options.Highlight != nil {
+				searchRequest.Highlight = bleve.NewHighlight()
+				searchRequest.Highlight.Fields = searchReq.Options.Highlight.Fields
+			}
+			// Apply sorting
+			for _, sort := range searchReq.Options.Sort {
+				if sort.Field == "_score" {
+					searchRequest.SortBy([]string{"-_score"})
+				} else {
+					if sort.Desc {
+						searchRequest.SortBy([]string{"-" + sort.Field})
+					} else {
+						searchRequest.SortBy([]string{sort.Field})
+					}
+				}
+			}
+		}
+
+		// Execute search
+		searchResult, err := index.Search(searchRequest)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Search failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Return JSON response
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(searchResult); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
+	}
 }
 
 // Templates
@@ -258,63 +511,35 @@ func handleIndex(index bleve.Index) http.HandlerFunc {
 	}
 }
 
-func handleSearch(index bleve.Index) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		query := r.FormValue("query")
-		if query == "" {
-			http.Error(w, "Query is required", http.StatusBadRequest)
-			return
-		}
-
-		results, err := searchIndex(index, query, 10)
-		data := struct {
-			Error string
-			Hits  search.DocumentMatchCollection
-		}{}
-
-		if err != nil {
-			data.Error = fmt.Sprintf("Search failed: %v", err)
-		} else {
-			data.Hits = results.Hits
-		}
-
-		w.Header().Set("Content-Type", "text/html")
-		if err := searchResultsTemplate.Execute(w, data); err != nil {
-			log.Printf("Template execution error: %v", err)
-		}
-	}
-}
-
 func main() {
 	indexPath := "myindex.bleve"
 
-	// Create a new index
-	index, err := createIndex(indexPath)
+	// Try to open existing index first
+	index, err := bleve.Open(indexPath)
 	if err != nil {
-		log.Fatalf("Error creating index: %v", err)
-	}
-	defer index.Close()
-
-	// Index some sample documents
-	documents := []Document{
-		{ID: "doc1", Content: "The quick brown fox jumps over the lazy dog"},
-		{ID: "doc2", Content: "A journey of a thousand miles begins with a single step"},
-		{ID: "doc3", Content: "To be or not to be, that is the question"},
-	}
-
-	for _, doc := range documents {
-		err := indexDocument(index, doc)
+		// If index doesn't exist, create a new one
+		index, err = createIndex(indexPath)
 		if err != nil {
-			log.Printf("Error indexing document %s: %v", doc.ID, err)
-		} else {
-			fmt.Printf("Indexed document: %s\n", doc.ID)
+			log.Fatalf("Error creating index: %v", err)
+		}
+
+		// Index sample documents only for new index
+		documents := []Document{
+			{ID: "doc1", Content: "The quick brown fox jumps over the lazy dog"},
+			{ID: "doc2", Content: "A journey of a thousand miles begins with a single step"},
+			{ID: "doc3", Content: "To be or not to be, that is the question"},
+		}
+
+		for _, doc := range documents {
+			err := indexDocument(index, doc)
+			if err != nil {
+				log.Printf("Error indexing document %s: %v", doc.ID, err)
+			} else {
+				fmt.Printf("Indexed document: %s\n", doc.ID)
+			}
 		}
 	}
+	defer index.Close()
 
 	// Set up HTTP server
 	http.HandleFunc("/", handleIndex(index))
