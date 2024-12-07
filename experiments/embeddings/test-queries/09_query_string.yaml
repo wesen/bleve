@@ -1,0 +1,8 @@
+query:
+  query_string:
+    query: "content:quick AND content:fox"
+    boost: 1.0
+options:
+  size: 10
+  highlight:
+    fields: [content] 

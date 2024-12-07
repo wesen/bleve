@@ -1,0 +1,14 @@
+query:
+  date_range:
+    field: created_at
+    start: "2024-01-01T00:00:00Z"
+    end: "2024-12-31T23:59:59Z"
+    inclusive_start: true
+    inclusive_end: true
+    boost: 1.0
+options:
+  size: 10
+  fields: [content, created_at]
+  sort:
+    - field: created_at
+      desc: true 

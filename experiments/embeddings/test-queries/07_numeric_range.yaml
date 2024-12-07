@@ -1,0 +1,11 @@
+query:
+  numeric_range:
+    field: price
+    min: 10.0
+    max: 100.0
+    inclusive_min: true
+    inclusive_max: false
+    boost: 1.0
+options:
+  size: 10
+  fields: [content, price] 
