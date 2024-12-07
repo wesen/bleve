@@ -20,3 +20,4 @@ tags
 go.sum
 
 *.bleve
+.history
