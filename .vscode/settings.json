@@ -1,3 +1,5 @@
 {
-  "go.buildTags": "vectors"
+  "go.buildTags": "vectors",
+  "go.buildFlags": ["-tags", "vectors"]
 }
+

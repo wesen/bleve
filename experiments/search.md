@@ -16,6 +16,7 @@ package main
 import (
     "fmt"
     "github.com/blevesearch/bleve/v2"
+    "github.com/blevesearch/bleve/v2/search/query"  // Import for direct Query object access
 )
 
 func main() {
@@ -27,10 +28,13 @@ func main() {
     defer index.Close()
 
     // Create a simple query
-    query := bleve.NewQueryStringQuery("search text")
+    // Note: bleve.NewQueryStringQuery is a convenience wrapper around query.NewQueryStringQuery
+    queryString := bleve.NewQueryStringQuery("search text")
+    // Alternatively, use the query package directly:
+    // queryString := query.NewQueryStringQuery("search text")
     
     // Perform search
-    searchRequest := bleve.NewSearchRequest(query)
+    searchRequest := bleve.NewSearchRequest(queryString)
     searchResult, err := index.Search(searchRequest)
     if err != nil {
         panic(err)
@@ -42,6 +46,8 @@ func main() {
     }
 }
 ```
+
+Note: Throughout this guide, we use the `bleve` package's convenience query constructors. The `Query` interface is defined in `github.com/blevesearch/bleve/v2/search/query`.
 
 ### Match Query
 
