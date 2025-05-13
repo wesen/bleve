@@ -11,10 +11,17 @@ import (
 	"github.com/blevesearch/bleve/v2/experiments/embeddings/embeddings"
 )
 
-var embeddingsClient *embeddings.Client
+var embeddingsClient *embeddings.GeppettoClient
 
+// SetEmbeddingsClient sets the embeddings client to use for vector queries
+func SetEmbeddingsClient(client *embeddings.GeppettoClient) {
+	embeddingsClient = client
+}
+
+// init initializes the package
 func init() {
-	embeddingsClient = embeddings.DefaultClient()
+	// We will set the client when needed through SetEmbeddingsClient
+	// This prevents initializing a client at package import time
 }
 
 // BuildBleveQuery converts a QueryDSL to a bleve.Query
@@ -77,6 +84,11 @@ func BuildBleveQuery(q QueryDSL) (bleve_query.Query, error) {
 	if q.Vector != nil {
 		var queryVector []float32
 		var err error
+
+		// Check if embeddings client is set
+		if embeddingsClient == nil {
+			return nil, fmt.Errorf("embeddings client not set, call SetEmbeddingsClient first")
+		}
 
 		if q.Vector.Text != "" {
 			queryVector, err = embeddingsClient.GenerateEmbedding(q.Vector.Text)

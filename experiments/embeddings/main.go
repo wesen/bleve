@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/mapping"
@@ -18,7 +19,7 @@ type Document struct {
 }
 
 // indexDocument indexes a document into Bleve, generating and storing its embedding.
-func indexDocument(index bleve.Index, doc Document, embeddingsClient *embeddings.Client) error {
+func indexDocument(index bleve.Index, doc Document, embeddingsClient *embeddings.GeppettoClient) error {
 	embedding, err := embeddingsClient.GenerateEmbedding(doc.Content)
 	if err != nil {
 		return fmt.Errorf("failed to generate embedding: %w", err)
@@ -35,7 +36,7 @@ func indexDocument(index bleve.Index, doc Document, embeddingsClient *embeddings
 }
 
 // createIndex creates a new Bleve index with vector search capabilities.
-func createIndex(indexPath string, embeddingsClient *embeddings.Client) (bleve.Index, error) {
+func createIndex(indexPath string, embeddingsClient *embeddings.GeppettoClient) (bleve.Index, error) {
 	// Create the index mapping
 	indexMapping := bleve.NewIndexMapping()
 	documentMapping := bleve.NewDocumentMapping()
@@ -64,7 +65,33 @@ func createIndex(indexPath string, embeddingsClient *embeddings.Client) (bleve.I
 
 func main() {
 	indexPath := "myindex.bleve"
-	embeddingsClient := embeddings.DefaultClient()
+
+	// Create embeddings client with disk caching
+	cacheDir := "./embeddings_cache"
+
+	// Ensure cache directory exists
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		log.Printf("Warning: Failed to create cache directory: %v. Falling back to memory cache.", err)
+	}
+
+	var embeddingsClient *embeddings.GeppettoClient
+	var err error
+
+	// Try to create disk-cached client
+	embeddingsClient, err = embeddings.DefaultDiskCachedGeppettoClient(cacheDir)
+	if err != nil {
+		log.Printf("Warning: Failed to create disk-cached embeddings client: %v. Falling back to memory cache.", err)
+		// Fall back to memory-cached client
+		embeddingsClient = embeddings.DefaultCachedGeppettoClient(1000)
+	}
+
+	// Log client information
+	log.Printf("Using embeddings client with model: %s, dimensions: %d",
+		embeddingsClient.GetModel(), embeddingsClient.GetDimensions())
+
+	// Log cache information
+	cacheStats := embeddingsClient.GetCacheStats()
+	log.Printf("Cache stats: %v", cacheStats)
 
 	// Try to open existing index first
 	index, err := bleve.Open(indexPath)
@@ -93,8 +120,8 @@ func main() {
 	}
 	defer index.Close()
 
-	// Create and start server
-	server := NewServer(index)
+	// Create and start server with the embeddings client
+	server := NewServer(index, embeddingsClient)
 	if err := server.Start(":8080"); err != nil {
 		log.Fatal(err)
 	}

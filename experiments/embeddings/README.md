@@ -1,8 +1,8 @@
-# Bleve Vector Search Server
+# Bleve Vector Search Server with Geppetto Embeddings
 
-This is an experimental server that demonstrates the vector search capabilities of Bleve, combined with Ollama for generating embeddings. It provides a REST API for searching documents using text similarity, vector similarity, and hybrid approaches.
+This is an experimental server that demonstrates the vector search capabilities of Bleve, combined with Geppetto's embeddings package for generating embeddings with caching support. It provides a REST API for searching documents using text similarity, vector similarity, and hybrid approaches.
 
-## Features
+## Enhanced Features
 
 - Full-text search with match and phrase queries
 - Vector similarity search using embeddings
@@ -10,7 +10,9 @@ This is an experimental server that demonstrates the vector search capabilities 
 - Document listing and inspection
 - Web interface for exploring the index
 - YAML-based query DSL
-- Automatic embedding generation using Ollama
+- **Automatic embedding generation using Ollama via Geppetto**
+- **Caching support for embeddings (in-memory and disk-based)**
+- **Advanced embeddings management through dedicated endpoints**
 
 ## Prerequisites
 
@@ -44,95 +46,152 @@ go run .
 
 The server will start on http://localhost:8080.
 
-## API Endpoints
+## Embeddings Architecture
 
-### 1. List Documents (`GET /documents`)
+The embeddings package now utilizes the Geppetto embeddings library for enhanced functionality:
 
-Lists all documents in the index with their fields.
+### Key Components
+
+1. **GeppettoClient**: 
+   - Wrapper around the Geppetto embeddings provider
+   - Supports multiple provider implementations
+   - Compatible with the original client interface
+
+2. **Embedding Providers**:
+   - Direct Ollama provider
+   - Memory-cached provider
+   - Disk-cached provider
+
+3. **Caching Mechanisms**:
+   - In-memory LRU cache for short-lived applications
+   - Persistent disk cache for long-running services
+   - Configurable cache sizes and expiration
+
+### Embeddings Endpoints
+
+#### 1. Generate Embedding (`POST /embeddings`)
+
+Generates an embedding vector for provided text.
 
 ```bash
-curl -X GET http://localhost:8080/documents
+curl -X POST http://localhost:8080/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Hello world"}'
 ```
 
 Response:
 ```json
 {
-  "total": 3,
-  "documents": [
-    {
-      "id": "doc1",
-      "fields": {
-        "content": "The quick brown fox jumps over the lazy dog",
-        "vector": [0.123, 0.456, ...]
-      }
-    }
-  ]
+  "text": "Hello world",
+  "dimensions": 384,
+  "model": "all-minilm",
+  "embedding": [0.123, 0.456, ...]
 }
 ```
 
-### 2. Search (`POST /search`)
+#### 2. Get Cache Stats (`GET /cache/stats`)
 
-Performs a search using the query DSL. Accepts YAML-formatted requests.
+Returns the current state of the embeddings cache.
 
-#### Match Query Example:
 ```bash
-curl -X POST http://localhost:8080/search \
-  -H "Content-Type: application/yaml" \
-  -d '
-query:
-  match:
-    field: content
-    value: quick fox
-    boost: 1.0
-options:
-  size: 10
-  highlight:
-    fields: [content]'
+curl -X GET http://localhost:8080/cache/stats
 ```
 
-#### Match Phrase Query Example:
-```bash
-curl -X POST http://localhost:8080/search \
-  -H "Content-Type: application/yaml" \
-  -d '
-query:
-  match_phrase:
-    field: content
-    value: "quick brown fox"
-    boost: 1.0'
+Response:
+```json
+{
+  "type": "memory",
+  "size": 42,
+  "max_size": 1000,
+  "model": "all-minilm",
+  "dimensions": 384
+}
 ```
 
-#### Vector Query Example:
+#### 3. Clear Cache (`POST /cache/clear`)
+
+Clears the embeddings cache.
+
 ```bash
-curl -X POST http://localhost:8080/search \
-  -H "Content-Type: application/yaml" \
-  -d '
+curl -X POST http://localhost:8080/cache/clear
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Cache cleared successfully"
+}
+```
+
+## Web Interface
+
+The web interface has been enhanced with:
+
+1. **Embeddings Information Panel**:
+   - Model details
+   - Dimensions
+   - Cache type and statistics
+
+2. **Cache Management**:
+   - Button to clear the cache
+   - Button to refresh cache statistics
+
+3. **Embedding Generation Tool**:
+   - Text input for generating embeddings directly
+   - Display of generated embeddings
+
+4. **Improved YAML Query Interface**:
+   - Syntax-highlighted textarea for YAML queries
+   - Load example button for quick queries
+
+## Examples
+
+The `examples` directory contains scripts demonstrating the embeddings functionality:
+
+- `similarity.go`: Demonstrates text similarity calculation using the cached embeddings client
+
+### Running Examples
+
+```bash
+go run examples/similarity.go
+```
+
+## Vector Query Example
+
+The vector query support has been enhanced to include more efficient caching:
+
+```yaml
 query:
   vector:
     field: vector
     text: "What is the meaning of life?"
     model: all-minilm
     k: 10
-    boost: 1.0'
+    boost: 1.0
+options:
+  size: 10
+  highlight:
+    fields: [content]
 ```
 
-#### Boolean Query Example (Hybrid Search):
-```bash
-curl -X POST http://localhost:8080/search \
-  -H "Content-Type: application/yaml" \
-  -d '
+## Hybrid Search Example
+
+```yaml
 query:
   bool:
     must:
       - match:
           field: content
           value: fox
+          boost: 1.0
     should:
       - vector:
           field: vector
           text: "animal jumping"
           model: all-minilm
           k: 10
+          boost: 2.0
     minimum_should_match: 0
 options:
   size: 10
@@ -140,7 +199,7 @@ options:
     fields: [content]
   sort:
     - field: _score
-      desc: true'
+      desc: true
 ```
 
 ## Query DSL

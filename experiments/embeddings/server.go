@@ -10,19 +10,22 @@ import (
 	"github.com/blevesearch/bleve/v2"
 	"gopkg.in/yaml.v2"
 
+	"github.com/blevesearch/bleve/v2/experiments/embeddings/embeddings"
 	"github.com/blevesearch/bleve/v2/experiments/embeddings/query"
 	"github.com/blevesearch/bleve/v2/experiments/embeddings/templates"
 )
 
 // Server represents the HTTP server and its dependencies
 type Server struct {
-	index bleve.Index
+	index            bleve.Index
+	embeddingsClient *embeddings.GeppettoClient
 }
 
 // NewServer creates a new server instance
-func NewServer(index bleve.Index) *Server {
+func NewServer(index bleve.Index, embeddingsClient *embeddings.GeppettoClient) *Server {
 	return &Server{
-		index: index,
+		index:            index,
+		embeddingsClient: embeddingsClient,
 	}
 }
 
@@ -50,10 +53,19 @@ func (s *Server) handleIndex() http.HandlerFunc {
 			return
 		}
 
+		// Get cache statistics
+		cacheStats := s.embeddingsClient.GetCacheStats()
+
 		data := struct {
-			Mappings string
+			Mappings       string
+			EmbeddingsInfo map[string]interface{}
 		}{
 			Mappings: string(mappingYAML),
+			EmbeddingsInfo: map[string]interface{}{
+				"model":      s.embeddingsClient.GetModel(),
+				"dimensions": s.embeddingsClient.GetDimensions(),
+				"cache":      cacheStats,
+			},
 		}
 
 		w.Header().Set("Content-Type", "text/html")
@@ -84,6 +96,9 @@ func (s *Server) handleSearch() http.HandlerFunc {
 			http.Error(w, fmt.Sprintf("Failed to parse YAML: %v", err), http.StatusBadRequest)
 			return
 		}
+
+		// Update the embeddings client in the query package
+		query.SetEmbeddingsClient(s.embeddingsClient)
 
 		// Build the Bleve query
 		bleveQuery, err := query.BuildBleveQuery(searchReq.Query)
@@ -166,12 +181,128 @@ func (s *Server) handleListDocuments() http.HandlerFunc {
 	}
 }
 
+// handleEmbeddings handles the embeddings endpoint for direct embedding generation
+func (s *Server) handleEmbeddings() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Read the request body
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+
+		// Parse the JSON request
+		var request struct {
+			Text string `json:"text"`
+		}
+
+		if err := json.Unmarshal(body, &request); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to parse JSON: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		if request.Text == "" {
+			http.Error(w, "Text field is required", http.StatusBadRequest)
+			return
+		}
+
+		// Generate embedding
+		embedding, err := s.embeddingsClient.GenerateEmbedding(request.Text)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to generate embedding: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Return embedding
+		response := struct {
+			Text       string    `json:"text"`
+			Dimensions int       `json:"dimensions"`
+			Model      string    `json:"model"`
+			Embedding  []float32 `json:"embedding"`
+		}{
+			Text:       request.Text,
+			Dimensions: len(embedding),
+			Model:      s.embeddingsClient.GetModel(),
+			Embedding:  embedding,
+		}
+
+		// Return JSON response
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
+	}
+}
+
+// handleClearCache handles clearing the embeddings cache
+func (s *Server) handleClearCache() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Clear cache
+		err := s.embeddingsClient.ClearCache()
+
+		response := struct {
+			Success bool   `json:"success"`
+			Message string `json:"message"`
+		}{}
+
+		if err != nil {
+			response.Success = false
+			response.Message = fmt.Sprintf("Failed to clear cache: %v", err)
+		} else {
+			response.Success = true
+			response.Message = "Cache cleared successfully"
+		}
+
+		// Return JSON response
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
+	}
+}
+
+// handleCacheStats returns statistics about the embeddings cache
+func (s *Server) handleCacheStats() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Get cache statistics
+		stats := s.embeddingsClient.GetCacheStats()
+
+		// Add model information to stats
+		stats["model"] = s.embeddingsClient.GetModel()
+		stats["dimensions"] = s.embeddingsClient.GetDimensions()
+
+		// Return JSON response
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(stats); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
+	}
+}
+
 // Start starts the HTTP server
 func (s *Server) Start(addr string) error {
 	// Set up routes
 	http.HandleFunc("/", s.handleIndex())
 	http.HandleFunc("/search", s.handleSearch())
 	http.HandleFunc("/documents", s.handleListDocuments())
+	http.HandleFunc("/embeddings", s.handleEmbeddings())
+	http.HandleFunc("/cache/clear", s.handleClearCache())
+	http.HandleFunc("/cache/stats", s.handleCacheStats())
 
 	// Start server
 	log.Printf("Server starting on %s", addr)
